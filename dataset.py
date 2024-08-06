@@ -25,7 +25,7 @@ class EquationsImageDataset(Dataset):
         return len(self.data)
     
     def __getitem__(self, idx):
-        image_path = f'data/train/{self.data['path'][idx]}'
+        image_path = f"data/train/{self.data['path'][idx]}"
         image = Image.open(image_path).convert('RGB')
         image_tensor = self.image_transform(image)
         
