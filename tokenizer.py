@@ -9,7 +9,9 @@ class LaTeXTokenizer:
         self.vocab = defaultdict(lambda: len(self.vocab))
         self.vocab['<PAD>'] = 0
         self.vocab['<UNK>'] = 1
-        self.vocab['<SPC>'] = 2
+        self.vocab['<SOS>'] = 2
+        self.vocab['<EOS>'] = 3
+        self.vocab['<SPC>'] = 4
 
     def tokenize(self, expression: str) -> list:
         parts = re.split(r'(\s+)', expression)
@@ -21,7 +23,7 @@ class LaTeXTokenizer:
             else:
                 tokens.extend(re.findall(r'\\[a-zA-Z]+|{|}|[0-9]+|[a-zA-Z]+|[^a-zA-Z0-9\s]', part))
         
-        return tokens
+        return ['<SOS>'] + tokens + ['<EOS>']
 
     def build_vocab(self, expressions: list) -> None:
         for expression in tqdm(expressions, desc='Building vocabulary', unit='expression'):
@@ -43,7 +45,7 @@ class LaTeXTokenizer:
         reverse_vocab = {id: token for token, id in self.vocab.items()}
         decoded = ''.join(reverse_vocab.get(id, '<UNK>') for id in token_ids)
         
-        return decoded.replace('<SPC>', ' ')
+        return decoded.replace('<SPC>', ' ').replace('<SOS>', '').replace('<EOS>', '')
     
     def __call__(self, expression: Union[str, list]) -> Union[Tuple[list, int], str]:
         if isinstance(expression, str):
