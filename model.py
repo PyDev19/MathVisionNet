@@ -3,12 +3,14 @@ from torchmetrics import Accuracy
 from pytorch_lightning import LightningModule
 from torch.nn import Conv2d, ReLU, MaxPool2d, Linear, Embedding, LSTM, Sequential, CrossEntropyLoss, Dropout
 from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 class EquationRecognitionModel(LightningModule):
     def __init__(self, vocab_size, embed_size, hidden_size, num_layers):
         super(EquationRecognitionModel, self).__init__()
         self.save_hyperparameters()
+        self.lr = 1e-3
         
         self.cnn = Sequential(
             Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
@@ -86,6 +88,7 @@ class EquationRecognitionModel(LightningModule):
         return loss
     
     def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=1e-3)
+        optimizer = Adam(self.parameters(), lr=self.lr)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=2, verbose=True)
         
-        return optimizer
+        return {'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 'val_loss'}
