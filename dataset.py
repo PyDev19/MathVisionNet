@@ -1,8 +1,8 @@
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
+from torchvision.io import read_image
 from torchvision.transforms.v2 import Compose, ToDtype, CenterCrop, ToTensor, RandomRotation, ColorJitter, Normalize
-from PIL import Image
 from tokenizer import LaTeXTokenizer
 
 class EquationsImageDataset(Dataset):
@@ -17,8 +17,7 @@ class EquationsImageDataset(Dataset):
             RandomRotation(5),
             ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
             ToDtype(torch.float32, scale=True),
-            ToTensor(),
-            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
     
     def __len__(self):
@@ -26,7 +25,14 @@ class EquationsImageDataset(Dataset):
     
     def __getitem__(self, idx):
         image_path = f"data/train/{self.data['path'][idx]}"
-        image = Image.open(image_path).convert('RGB')
+        
+        image = read_image(image_path)
+        # Check if the image has 4 channels (RGBA)
+        if image.size(0) == 4:
+            # Convert RGBA to RGB by ignoring the alpha channel
+            image = image[:3, :, :]
+        
+        image = image.float() / 255.0
         image_tensor = self.image_transform(image)
         
         equation = self.data['truth'][idx]
