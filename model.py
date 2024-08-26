@@ -1,94 +1,122 @@
+from typing import Union
 import torch
-from torchmetrics import Accuracy
+from torch import Tensor
 from pytorch_lightning import LightningModule
-from torch.nn import Conv2d, ReLU, MaxPool2d, Linear, Embedding, LSTM, Sequential, CrossEntropyLoss, Dropout
-from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torch.nn import (
+    Module,
+    Sequential,
+    Embedding,
+    TransformerDecoder,
+    TransformerDecoderLayer,
+    Linear,
+    Conv2d,
+    ReLU,
+    SiLU,
+    MaxPool2d,
+    BatchNorm2d
+)
+from torch.nn.functional import cross_entropy
+from torchmetrics.functional import accuracy
 
-class EquationRecognitionModel(LightningModule):
-    def __init__(self, vocab_size, embed_size, hidden_size, num_layers):
-        super(EquationRecognitionModel, self).__init__()
-        self.save_hyperparameters()
-        self.lr = 1e-3
+class PositionalEncoding(Module):
+    def __init__(self, d_model, max_len=5000):
+        super(PositionalEncoding, self).__init__()
         
-        self.cnn = Sequential(
-            Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
-            ReLU(),
-            MaxPool2d(kernel_size=2, stride=2),
-            Dropout(0.3),
-            Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            ReLU(),
-            MaxPool2d(kernel_size=2, stride=2),
-            Dropout(0.3),
-            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            ReLU(),
-            MaxPool2d(kernel_size=2, stride=2),
-            Dropout(0.3),
+        positional_encoding = torch.zeros(max_len, d_model)
+        
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-torch.log(torch.tensor(10000.0)) / d_model))
+        
+        positional_encoding[:, 0::2] = torch.sin(position * div_term)
+        positional_encoding[:, 1::2] = torch.cos(position * div_term)
+        
+        positional_encoding = positional_encoding.unsqueeze(1)
+        
+        self.register_buffer('positional_encoding', positional_encoding)
+        
+    def forward(self, x):
+        x = x + self.positional_encoding[:x.size(0), :]
+        
+        return x
+    
+class Conv2dBlock(Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, activation='relu'):
+        super(Conv2dBlock, self).__init__()
+        
+        self.conv = Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding
         )
         
-        self.cnn_to_rnn = Linear(128 * 12 * 37, embed_size)
+        if activation == 'relu':
+            self.activation = ReLU()
+        if activation == 'silu':
+            self.activation = SiLU()
         
-        self.embedding = Embedding(vocab_size, embed_size)
-        self.lstm = LSTM(embed_size, hidden_size, num_layers, batch_first=True)
+        self.batchnorm = BatchNorm2d(num_features=out_channels)
+        self.maxpool = MaxPool2d(kernel_size=1, stride=1, padding=0)
         
-        self.output_layer = Linear(hidden_size, vocab_size)
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.activation(x)
+        x = self.batchnorm(x)
+        x = self.maxpool(x)
         
-        self.loss = CrossEntropyLoss(ignore_index=0)
-        self.accuracy = Accuracy(task='multiclass', num_classes=vocab_size, ignore_index=0)
-        self.example_input_array = (torch.randn(1, 3, 100, 300), torch.randint(1, 45, (1, 10)), torch.tensor([10]))
+        return x
+
+class Image2LaTeXTransformer(LightningModule):
+    def __init__(self, hyperparameters: dict[str, Union[int, list[int]]]):
+        super(Image2LaTeXTransformer, self).__init__()
+        channels = hyperparameters['cnn_channels']
+        output_dim = channels[-1]
         
-    def forward(self, images, equations, lengths):
-        cnn_features = self.cnn(images)
-        cnn_features = cnn_features.view(cnn_features.size(0), -1)
+        self.embedding = Embedding(hyperparameters['vocab_size'], output_dim)
+        self.positional_encoding = PositionalEncoding(output_dim)
         
-        cnn_features = self.cnn_to_rnn(cnn_features)
-        cnn_features = cnn_features.unsqueeze(1).repeat(1, equations.size(1), 1)
+        self.cnn = Sequential()
+
+        for i in range(len(channels)-1):
+            self.cnn.add_module(f'conv2d_block_{i}', Conv2dBlock(
+                in_channels=channels[i],
+                out_channels=channels[i+1],
+                kernel_size=1,
+                stride=1,
+                padding=0,
+                activation=hyperparameters['activation']
+            ))
         
-        embedded_equations = self.embedding(equations)
+        self.cnn_to_decoder = Linear(512 * 128 * 32, output_dim)
         
-        inputs = cnn_features + embedded_equations
+        self.decoder = TransformerDecoder(
+            decoder_layer=TransformerDecoderLayer(
+                d_model=output_dim,
+                nhead=hyperparameters['num_heads'],
+                dim_feedforward=hyperparameters['dim_feedforward'],
+                dropout=hyperparameters['dropout']
+            ),
+            num_layers=hyperparameters['num_decoder_layers']
+        )
         
-        packed_inputs = pack_padded_sequence(inputs, lengths.cpu(), batch_first=True, enforce_sorted=False)
-        packed_outputs, _ = self.lstm(packed_inputs)
+        self.output_layer = Linear(output_dim, hyperparameters['vocab_size'])
         
-        outputs, _ = pad_packed_sequence(packed_outputs, batch_first=True)
-        outputs = self.output_layer(outputs)
-        
-        return outputs
+        self.save_hyperparameters()
+        self.example_input_array = (torch.rand(1, 3, 512, 512*4), torch.randint(1, hyperparameters['vocab_size'], (1, hyperparameters['vocab_size'])))
     
-    def training_step(self, batch, batch_idx):
-        images, equations, lengths = batch
+    def forward(self, images: Tensor, equations: Tensor):
+        image_features: Tensor = self.cnn(images)
         
-        outputs = self(images, equations[:, :-1], lengths - 1)
-        targets = equations[:, 1:]
+        image_features = image_features.view(image_features.size(0), -1)
+        image_features = self.cnn_to_decoder(image_features)
         
-        loss = self.loss(outputs.transpose(2, 1), targets)
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        image_features = image_features.view(-1, image_features.size(0), image_features.size(1))
         
-        preds = torch.argmax(outputs, dim=2)
-        acc = self.accuracy(preds, targets)
-        self.log('train_acc', acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        target_embedding = self.embedding(equations)
+        target_embedding = self.positional_encoding(target_embedding)
         
-        return loss
-    
-    def validation_step(self, batch, batch_idx):
-        images, equations, lengths = batch
+        output = self.decoder(target_embedding, image_features)
+        output = self.output_layer(output)
         
-        outputs = self(images, equations[:, :-1], lengths - 1)
-        targets = equations[:, 1:]
-        
-        loss = self.loss(outputs.transpose(2, 1), targets)
-        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        
-        preds = torch.argmax(outputs, dim=2)
-        acc = self.accuracy(preds, targets)
-        self.log('val_acc', acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        
-        return loss
-    
-    def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=self.lr)
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=2, verbose=True)
-        
-        return {'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 'val_loss'}
+        return output
