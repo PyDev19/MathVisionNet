@@ -47,6 +47,7 @@ class MathEquationsDataset(Dataset):
                 break
         
         tokenized_equation = image_label['image_data']['visible_char_map']
+        tokenized_equation = [92] + tokenized_equation + [93]
         tokenized_equation = torch.tensor(tokenized_equation)
         
         return image_tensor, tokenized_equation
