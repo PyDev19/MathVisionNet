@@ -6,30 +6,28 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision.transforms.v2 import (
     Resize,
-    Pad,
-    CenterCrop,
-    RandomRotation,
-    RandomHorizontalFlip,
-    RandomVerticalFlip,
     Compose,
-    ColorJitter
+    ColorJitter,
+    RandomAffine,
+    GaussianBlur,
+    RandomInvert
 )
 from torchvision.io import read_image
 from pytorch_lightning import LightningDataModule
 
 class MathEquationsDataset(Dataset):
-    def __init__(self, directory: str):
+    def __init__(self, directory: str, image_size=(128, 512)):
         self.images = glob(os.path.join(f'{directory}/background_images/', '*.jpg'))
-        self.labels = json.load(glob(os.path.join(f'{directory}/background_images/', '*.json'))[0])
+        self.labels = json.load(
+            open(glob(os.path.join(f'{directory}/JSON/', '*.json'))[0])
+        )
         
         self.transform = Compose([
-            Resize((512, 512*4)),
-            Pad((16, 16, 16, 16), fill=0, padding_mode='constant'),
-            CenterCrop((512, 512*4)),
-            RandomRotation(5),
-            RandomHorizontalFlip(),
-            RandomVerticalFlip(),
-            ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.5)
+            Resize(image_size),
+            RandomInvert(),
+            ColorJitter(brightness=0.2, contrast=0.2, saturation=0.5, hue=0.5),
+            RandomAffine(degrees=2, translate=(0.02, 0.02)),
+            GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 0.5)),
         ])
 
     def __len__(self):
@@ -54,12 +52,13 @@ class MathEquationsDataset(Dataset):
         return image_tensor, tokenized_equation
 
 class MathEquationsDatamodule(LightningDataModule):
-    def __init__(self, directory: str, batch_size: int = 32, num_workers=2, test=False):
+    def __init__(self, directory: str, image_size, batch_size: int = 32, num_workers=2, test=False):
         super().__init__()
         
         self.directory = directory
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.image_size = image_size
         self.test = test
     
     def collate_fn(self, batch):
@@ -71,7 +70,7 @@ class MathEquationsDatamodule(LightningDataModule):
         return images, equations
     
     def setup(self, stage=None):
-        dataset = MathEquationsDataset(self.directory)
+        dataset = MathEquationsDataset(self.directory, self.image_size)
         
         if self.test:
             train_size = int(0.7 * len(dataset))
