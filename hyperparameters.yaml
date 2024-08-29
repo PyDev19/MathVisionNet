@@ -1,0 +1,26 @@
+batch_size: 8
+model:
+    dim_feedforward: 1024
+    dropout: 0.1
+    embedding_dim: 768
+    hidden_dim: 768
+    image_size: !!python/tuple
+    - 128
+    - 512
+    max_length: 1024
+    num_channels: 3
+    num_decoder_layers: 6
+    num_encoder_layers: 6
+    num_heads: 8
+    patch_size: 16
+    qkv_bias: true
+    vocab_size: 94
+num_epochs: 100
+num_workers: 16
+optimizer:
+    betas: !!python/tuple
+    - 0.9
+    - 0.98
+    eps: 1.0e-09
+    learning_rate: 0.0001
+    warmup_steps: 4000
