@@ -51,14 +51,14 @@ class EncoderBlock(Module):
             Tensor: Output tensor of shape (batch_size, sequence_length, hidden_size).
         """
         # Apply self-attention mechanism
-        attention_output, attention_probs = self.attention(x)
+        attention_output = self.attention(x)
         x = self.attention_layer_norm(x + attention_output)
         
         # Apply MLP
         mlp_output = self.mlp(x)
         x = self.mlp_layer_norm(x + mlp_output)
         
-        return x, attention_probs
+        return x
 
 class EncoderLayer(Module):
     def __init__(self, hyperparameters: dict[str, int]):
@@ -75,9 +75,7 @@ class EncoderLayer(Module):
         Returns:
             Tensor: Output tensor of shape (batch_size, sequence_length, hidden_size).
         """
-        attention_probabilities = []
         for encoder_block in self.encoder_blocks:
-            x, attention_probability = encoder_block(x)
-            attention_probabilities.append(attention_probability)
+            x = encoder_block(x)
         
-        return x, attention_probabilities
+        return x

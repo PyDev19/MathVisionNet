@@ -61,4 +61,4 @@ class MultiHeadAttention(Module):
         attention_output = self.output_projection(attention_output)
         attention_output = self.output_dropout(attention_output)
         
-        return attention_output, attention_probabilities
+        return attention_output
