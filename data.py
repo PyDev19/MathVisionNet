@@ -1,5 +1,5 @@
 import os
-import json
+import pandas as pd
 import torch
 from glob import glob
 from torch.nn.utils.rnn import pad_sequence
@@ -17,10 +17,8 @@ from pytorch_lightning import LightningDataModule
 
 class MathEquationsDataset(Dataset):
     def __init__(self, directory: str, image_size=(128, 512)):
-        self.images = glob(os.path.join(f'{directory}/background_images/', '*.jpg'))
-        self.labels = json.load(
-            open(glob(os.path.join(f'{directory}/JSON/', '*.json'))[0])
-        )
+        self.images = glob(os.path.join(f'{directory}/images/', '*.jpg'))
+        self.labels = pd.read_csv('data/annotations.csv')
         
         self.transform = Compose([
             Resize(image_size),
@@ -35,18 +33,13 @@ class MathEquationsDataset(Dataset):
 
     def __getitem__(self, idx):
         image = self.images[idx]
+        basename = os.path.basename(image)
         
         image_tensor = read_image(image)
         image_tensor = image_tensor.float() / 255.0
         image_tensor = self.transform(image_tensor)
         
-        image_label = {}
-        for label in self.labels:
-            if label['filename'] == image.split('/')[-1]:
-                image_label = label
-                break
-        
-        tokenized_equation = image_label['image_data']['visible_char_map']
+        tokenized_equation = self.labels[basename]['image_data']['visible_char_map']
         tokenized_equation = [92] + tokenized_equation + [93]
         tokenized_equation = torch.tensor(tokenized_equation)
         
