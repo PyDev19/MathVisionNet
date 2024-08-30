@@ -1,4 +1,5 @@
 import os
+import ast
 import pandas as pd
 import torch
 from glob import glob
@@ -39,21 +40,22 @@ class MathEquationsDataset(Dataset):
         image_tensor = image_tensor.float() / 255.0
         image_tensor = self.transform(image_tensor)
         
-        tokenized_equation = self.labels[basename]['image_data']['visible_char_map']
+        image_data = self.labels.loc[self.labels['filenames'] == basename]['image_data']
+        image_data = ast.literal_eval(image_data.values[0])
+        tokenized_equation = image_data['visible_char_map']
         tokenized_equation = [92] + tokenized_equation + [93]
         tokenized_equation = torch.tensor(tokenized_equation)
         
         return image_tensor, tokenized_equation
 
 class MathEquationsDatamodule(LightningDataModule):
-    def __init__(self, directory: str, image_size, batch_size: int = 32, num_workers=2, test=False):
+    def __init__(self, directory: str, image_size, batch_size: int = 32, num_workers=2):
         super().__init__()
         
         self.directory = directory
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.image_size = image_size
-        self.test = test
     
     def collate_fn(self, batch):
         images, equations = zip(*batch)
@@ -66,18 +68,12 @@ class MathEquationsDatamodule(LightningDataModule):
     def setup(self, stage=None):
         dataset = MathEquationsDataset(self.directory, self.image_size)
         
-        if self.test:
-            train_size = int(0.7 * len(dataset))
-            val_size = int(0.2 * len(dataset))
-            test_size = len(dataset) - train_size - val_size
-            
-            self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [train_size, val_size, test_size])
-        else:
-            train_size = int(0.8 * len(dataset))
-            val_size = len(dataset) - train_size
-            
-            self.train_dataset, self.val_dataset = random_split(dataset, [train_size, val_size])
-    
+        train_size = int(0.6 * len(dataset))
+        val_size = int(0.2 * len(dataset))
+        test_size = len(dataset) - train_size - val_size
+        
+        self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [train_size, val_size, test_size])
+
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
@@ -97,13 +93,10 @@ class MathEquationsDatamodule(LightningDataModule):
         )
     
     def test_dataloader(self):
-        if self.test:
-            return DataLoader(
-                self.test_dataset,
-                batch_size=self.batch_size,
-                collate_fn=self.collate_fn,
-                shuffle=False,
-                num_workers=self.num_workers
-            )
-        else:
-            raise ValueError('Test dataloader is not available for this module')
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            collate_fn=self.collate_fn,
+            shuffle=False,
+            num_workers=self.num_workers
+        )
