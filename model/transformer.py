@@ -2,11 +2,12 @@ import torch
 from torch import Tensor
 from torch.nn import TransformerDecoder, TransformerDecoderLayer, Linear
 from torch.optim import Adam
+from torch.nn.functional import cross_entropy
 from torchmetrics.functional import accuracy
 from pytorch_lightning import LightningModule
 from model.embedding import ImageEmbeddings, TargetEmbeddings
 from model.encoder import EncoderLayer
-from utils import cross_entropy_loss, TransformerScheduler
+from scheduler import TransformerScheduler
 
 class Image2LaTeXVisionTransformer(LightningModule):
     def __init__(self, hyperparameters: dict[str, int], optimizer_hyperparameters: dict):
@@ -37,9 +38,12 @@ class Image2LaTeXVisionTransformer(LightningModule):
         self.save_hyperparameters()
     
     def generate_square_subsequent_mask(self, sz: int) -> Tensor:
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        mask = torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
+        
         return mask
+
+    def create_padding_mask(self, sequences: Tensor) -> Tensor:
+        return (sequences == 0)
     
     def forward(self, input_image: Tensor, target_sequence: Tensor) -> Tensor:
         image_embeddings = self.image_embeddings(input_image)
@@ -47,16 +51,17 @@ class Image2LaTeXVisionTransformer(LightningModule):
         
         encoder_output = self.encoder(image_embeddings)
         
-        target_embeddings = target_embeddings.transpose(0, 1)
-        decoder_image = encoder_output.transpose(0, 1)
+        target_embeddings = target_embeddings.transpose(0, 1) # (sequence_length, batch_size, embedding_dim)
+        decoder_image = encoder_output.transpose(0, 1) # (sequence_length, batch_size, embedding_dim)
         
-        target_mask = self.generate_square_subsequent_mask(target_sequence.size(1))
-        
+        target_mask = self.generate_square_subsequent_mask(target_embeddings.size(0))
+        target_padding_mask = self.create_padding_mask(target_sequence)
+                
         decoder_output = self.decoder(
             target_embeddings,
             decoder_image,
             tgt_mask=target_mask,
-            tgt_is_causal=True,
+            tgt_key_padding_mask=target_padding_mask,
         )
         
         output_logits = self.output_projection(decoder_output)
@@ -67,37 +72,70 @@ class Image2LaTeXVisionTransformer(LightningModule):
 
     def training_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
         input_image, target_sequence = batch
-        output_logits = self(input_image, target_sequence)
+        output_logits = self(input_image, target_sequence[:, :-1])
         
-        loss = cross_entropy_loss(output_logits, target_sequence, ignore_index=0, label_smoothing=0.1)
-        accuracy_score = accuracy(output_logits.argmax(dim=-1), target_sequence, ignore_index=0, num_classes=91, task="multiclass")
+        pad_mask = (target_sequence[:, 1:] != self.model_hyperparameters['padding_idx']).float()
+        
+        loss = cross_entropy(
+            output_logits.view(-1, output_logits.size(-1)),
+            target_sequence[:, 1:].contiguous().view(-1),
+            reduction="none",
+            label_smoothing=0.1
+        )
+        loss = (loss * pad_mask.view(-1)).sum() / pad_mask.sum()
+        
+        preds = torch.argmax(output_logits, dim=-1)
+        correct = (preds == target_sequence[:, 1:]) * pad_mask.bool()
+        acc = correct.sum() / pad_mask.sum()
         
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log("train_accuracy", accuracy_score, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train_accuracy", acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
         return loss
 
     def validation_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
         input_image, target_sequence = batch
-        output_logits = self(input_image, target_sequence)
+        output_logits = self(input_image, target_sequence[:, :-1])
         
-        loss = cross_entropy_loss(output_logits, target_sequence, ignore_index=0, label_smoothing=0.1)
-        accuracy_score = accuracy(output_logits.argmax(dim=-1), target_sequence, ignore_index=0, num_classes=91, task="multiclass")
+        pad_mask = (target_sequence[:, 1:] != self.model_hyperparameters['padding_idx']).float()
+        
+        loss = cross_entropy(
+            output_logits.view(-1, output_logits.size(-1)),
+            target_sequence[:, 1:].contiguous().view(-1),
+            reduction="none",
+            label_smoothing=0.1
+        )
+        loss = (loss * pad_mask.view(-1)).sum() / pad_mask.sum()
+        
+        preds = torch.argmax(output_logits, dim=-1)
+        correct = (preds == target_sequence[:, 1:]) * pad_mask.bool()
+        acc = correct.sum() / pad_mask.sum()
         
         self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_accuracy", accuracy_score, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_accuracy", acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
         return loss
     
     def test_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
-        input_image, target_sequence = batch
-        output_logits = self(input_image, target_sequence)
+        input_image, no_eos, no_sos = batch
+        output_logits = self(input_image, no_eos)
         
-        loss = cross_entropy_loss(output_logits, target_sequence, ignore_index=0, label_smoothing=0.1)
-        accuracy_score = accuracy(output_logits.argmax(dim=-1), target_sequence, ignore_index=0, num_classes=91, task="multiclass")
+        pad_mask = (no_sos != 0).float()
+        
+        loss = cross_entropy(
+            output_logits.view(-1, output_logits.size(-1)),
+            no_sos.contiguous().view(-1),
+            reduction="none",
+            label_smoothing=0.1
+        )
+        loss = (loss * pad_mask.view(-1)).sum() / pad_mask.sum()
+        
+        preds = torch.argmax(output_logits, dim=-1)
+        correct = (preds == no_sos) * pad_mask.bool()
+        acc = correct.sum() / pad_mask.sum()
         
         self.log("test_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log("test_accuracy", accuracy_score, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("test_accuracy", acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
         return loss
 
@@ -108,11 +146,15 @@ class Image2LaTeXVisionTransformer(LightningModule):
             betas=self.optimizer_hyperparameters["betas"],
             eps=self.optimizer_hyperparameters["eps"]
         )
-        
-        scheduler = TransformerScheduler(
-            optimizer=optimizer,
-            dim_embed=self.model_hyperparameters["embedding_dim"],
-            warmup_steps=self.optimizer_hyperparameters["warmup_steps"]
-        )
-        
+
+        scheduler = {
+            'scheduler': TransformerScheduler(
+                optimizer=optimizer,
+                dim_embed=self.model_hyperparameters["embedding_dim"],
+                warmup_steps=self.optimizer_hyperparameters["warmup_steps"]
+            ),
+            'interval': 'step',
+            'frequency': 1
+        }
+
         return [optimizer], [scheduler]
