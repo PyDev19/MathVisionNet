@@ -19,7 +19,7 @@ from pytorch_lightning import LightningDataModule
 class MathEquationsDataset(Dataset):
     def __init__(self, directory: str, image_size=(128, 512)):
         self.images = glob(os.path.join(f'{directory}/images/', '*.jpg'))
-        self.labels = pd.read_csv('data/annotations.csv')
+        self.labels = pd.read_csv(f'{directory}/annotations.csv')
         
         self.transform = Compose([
             Resize(image_size),
@@ -42,8 +42,10 @@ class MathEquationsDataset(Dataset):
         
         image_data = self.labels.loc[self.labels['filenames'] == basename]['image_data']
         image_data = ast.literal_eval(image_data.values[0])
+        
         tokenized_equation = image_data['visible_char_map']
         tokenized_equation = [92] + tokenized_equation + [93]
+        
         tokenized_equation = torch.tensor(tokenized_equation)
         
         return image_tensor, tokenized_equation
@@ -61,9 +63,13 @@ class MathEquationsDatamodule(LightningDataModule):
         images, equations = zip(*batch)
         
         images = torch.stack(images)
-        equations = pad_sequence(equations, batch_first=True, padding_value=0.0)
+        equations_without_eos = [equation[:-1] for equation in equations]
+        equations_without_sos = [equation[1:] for equation in equations]
         
-        return images, equations
+        no_eos = pad_sequence(equations_without_eos, batch_first=True, padding_value=0)
+        no_sos = pad_sequence(equations_without_sos, batch_first=True, padding_value=0)
+        
+        return images, no_eos, no_sos
     
     def setup(self, stage=None):
         dataset = MathEquationsDataset(self.directory, self.image_size)
