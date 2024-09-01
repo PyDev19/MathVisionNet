@@ -25,12 +25,3 @@ class TransformerScheduler(_LRScheduler):
     def get_lr(self) -> float:
         lr = self.calc_lr(self._step_count)
         return [lr] * self.num_param_groups
-
-def cross_entropy_loss(output: Tensor, target: Tensor, ignore_index: int, label_smoothing: float=0.1) -> Tensor:
-    vocab_size = output.shape[-1]
-    logits = output.reshape(-1, vocab_size)
-    labels = target.reshape(-1).long()
-    
-    loss = cross_entropy(logits, labels, ignore_index=ignore_index, label_smoothing=label_smoothing)
-
-    return loss
