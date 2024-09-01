@@ -37,13 +37,13 @@ class Image2LaTeXVisionTransformer(LightningModule):
         self.example_input_array = (torch.randn(1, 3, 128, 512), torch.randint(1, 91, (1, 100)))
         self.save_hyperparameters()
     
-    def generate_square_subsequent_mask(self, sz: int) -> Tensor:
-        mask = torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
+    def generate_square_subsequent_mask(self, sequences: Tensor) -> Tensor:
+        mask = torch.triu(torch.ones(sequences.size(0), sequences.size(0)) * float('-inf'), diagonal=1)
         
-        return mask
+        return mask.to(sequences.device)
 
     def create_padding_mask(self, sequences: Tensor) -> Tensor:
-        return (sequences == 0)
+        return (sequences == 0).to(sequences.device)
     
     def forward(self, input_image: Tensor, target_sequence: Tensor) -> Tensor:
         image_embeddings = self.image_embeddings(input_image)
@@ -54,7 +54,7 @@ class Image2LaTeXVisionTransformer(LightningModule):
         target_embeddings = target_embeddings.transpose(0, 1) # (sequence_length, batch_size, embedding_dim)
         decoder_image = encoder_output.transpose(0, 1) # (sequence_length, batch_size, embedding_dim)
         
-        target_mask = self.generate_square_subsequent_mask(target_embeddings.size(0))
+        target_mask = self.generate_square_subsequent_mask(target_embeddings)
         target_padding_mask = self.create_padding_mask(target_sequence)
                 
         decoder_output = self.decoder(
@@ -71,21 +71,21 @@ class Image2LaTeXVisionTransformer(LightningModule):
         return output_logits
 
     def training_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
-        input_image, target_sequence = batch
-        output_logits = self(input_image, target_sequence[:, :-1])
+        input_image, no_eos, no_sos = batch
+        output_logits = self(input_image, no_eos)
         
-        pad_mask = (target_sequence[:, 1:] != self.model_hyperparameters['padding_idx']).float()
+        pad_mask = (no_sos != 0).float()
         
         loss = cross_entropy(
-            output_logits.view(-1, output_logits.size(-1)),
-            target_sequence[:, 1:].contiguous().view(-1),
+            output_logits.contiguous().view(-1, output_logits.size(-1)),
+            no_sos.contiguous().view(-1),
             reduction="none",
             label_smoothing=0.1
         )
         loss = (loss * pad_mask.view(-1)).sum() / pad_mask.sum()
         
         preds = torch.argmax(output_logits, dim=-1)
-        correct = (preds == target_sequence[:, 1:]) * pad_mask.bool()
+        correct = (preds == no_sos) * pad_mask.bool()
         acc = correct.sum() / pad_mask.sum()
         
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -94,21 +94,21 @@ class Image2LaTeXVisionTransformer(LightningModule):
         return loss
 
     def validation_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
-        input_image, target_sequence = batch
-        output_logits = self(input_image, target_sequence[:, :-1])
+        input_image, no_eos, no_sos = batch
+        output_logits = self(input_image, no_eos)
         
-        pad_mask = (target_sequence[:, 1:] != self.model_hyperparameters['padding_idx']).float()
+        pad_mask = (no_sos != 0).float()
         
         loss = cross_entropy(
-            output_logits.view(-1, output_logits.size(-1)),
-            target_sequence[:, 1:].contiguous().view(-1),
+            output_logits.contiguous().view(-1, output_logits.size(-1)),
+            no_sos.contiguous().view(-1),
             reduction="none",
             label_smoothing=0.1
         )
         loss = (loss * pad_mask.view(-1)).sum() / pad_mask.sum()
         
         preds = torch.argmax(output_logits, dim=-1)
-        correct = (preds == target_sequence[:, 1:]) * pad_mask.bool()
+        correct = (preds == no_sos) * pad_mask.bool()
         acc = correct.sum() / pad_mask.sum()
         
         self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -123,7 +123,7 @@ class Image2LaTeXVisionTransformer(LightningModule):
         pad_mask = (no_sos != 0).float()
         
         loss = cross_entropy(
-            output_logits.view(-1, output_logits.size(-1)),
+            output_logits.contiguous().view(-1, output_logits.size(-1)),
             no_sos.contiguous().view(-1),
             reduction="none",
             label_smoothing=0.1
