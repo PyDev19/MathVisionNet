@@ -5,24 +5,21 @@ from torch.nn import Module, Linear, Dropout
 from torch.nn.functional import softmax
 
 class MultiHeadAttention(Module):
-    def __init__(self, hyperparameters: dict[str, int]):
+    def __init__(self, embedding_dim: int, num_heads: int, qkv_bias: bool, dropout: float):
         super().__init__()
-        self.embedding_dim = hyperparameters["embedding_dim"]
-        self.num_heads = hyperparameters["num_heads"]
+        self.num_heads = num_heads
 
         # Compute the size of each attention head
-        self.size_per_head = self.embedding_dim // self.num_heads
+        self.size_per_head = embedding_dim // self.num_heads
         self.attention_size = self.num_heads * self.size_per_head
 
-        self.qkv_bias = hyperparameters["qkv_bias"]
-
         # Linear layer to project input into query, key, and value vectors
-        self.qkv_projection = Linear(self.embedding_dim, self.attention_size * 3, bias=self.qkv_bias)
-        self.attn_dropout = Dropout(hyperparameters["dropout"])
+        self.qkv_projection = Linear(embedding_dim, self.attention_size * 3, bias=qkv_bias)
+        self.attn_dropout = Dropout(dropout)
 
         # Linear layer to project the concatenated output of all attention heads
-        self.output_projection = Linear(self.attention_size, self.embedding_dim)
-        self.output_dropout = Dropout(hyperparameters["dropout"])
+        self.output_projection = Linear(self.attention_size, embedding_dim)
+        self.output_dropout = Dropout(dropout)
 
     def forward(self, input_tensor: Tensor) -> tuple[Tensor, Tensor]:
         """Forward pass of the MultiHeadAttention module.

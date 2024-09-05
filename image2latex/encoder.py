@@ -1,17 +1,17 @@
 from torch import Tensor
 from torch.nn import Module, ModuleList, Linear, Dropout, GELU, LayerNorm
-from model.attention import MultiHeadAttention
+from image2latex.attention import MultiHeadAttention
 
 class MLP(Module):
-    def __init__(self, hyperparameters: dict[str, int]):
+    def __init__(self, embedding_dim: int, hidden_dim: int, dropout: float):
         super().__init__()
         
-        self.dense_1 = Linear(hyperparameters["embedding_dim"], hyperparameters["dim_feedforward"])
+        self.dense_1 = Linear(embedding_dim, hidden_dim)
         
         self.activation = GELU()
         
-        self.dense_2 = Linear(hyperparameters["dim_feedforward"], hyperparameters["embedding_dim"])
-        self.dropout = Dropout(hyperparameters["dropout"])
+        self.dense_2 = Linear(hidden_dim, embedding_dim)
+        self.dropout = Dropout(dropout)
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass of the MLP module.
@@ -32,14 +32,14 @@ class MLP(Module):
         return x
 
 class EncoderBlock(Module):
-    def __init__(self, hyperparameters: dict[str, int]):
+    def __init__(self, embedding_dim: int, num_heads: int, qkv_bias: bool, dropout: float, hidden_dim: int):
         super().__init__()
         
-        self.attention = MultiHeadAttention(hyperparameters)
-        self.attention_layer_norm = LayerNorm(hyperparameters["hidden_dim"])
+        self.attention = MultiHeadAttention(embedding_dim, num_heads, qkv_bias, dropout)
+        self.attention_layer_norm = LayerNorm(hidden_dim)
         
-        self.mlp = MLP(hyperparameters)
-        self.mlp_layer_norm = LayerNorm(hyperparameters["hidden_dim"])
+        self.mlp = MLP(embedding_dim, hidden_dim, dropout)
+        self.mlp_layer_norm = LayerNorm(hidden_dim)
         
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass of the EncoderBlock module.
@@ -61,10 +61,12 @@ class EncoderBlock(Module):
         return x
 
 class EncoderLayer(Module):
-    def __init__(self, hyperparameters: dict[str, int]):
+    def __init__(self, embedding_dim: int, num_heads: int, qkv_bias: bool, dropout: float, hidden_dim: int, num_encoder_layers: int):
         super().__init__()
         
-        self.encoder_blocks = ModuleList([EncoderBlock(hyperparameters) for _ in range(hyperparameters["num_encoder_layers"])])
+        self.encoder_blocks = ModuleList([
+            EncoderBlock(embedding_dim, num_heads, qkv_bias, dropout, hidden_dim) for _ in range(num_encoder_layers)
+        ])
     
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass of the EncoderLayer module.

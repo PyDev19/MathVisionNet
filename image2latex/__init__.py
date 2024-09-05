@@ -1,0 +1,1 @@
+from image2latex.transformer import VisionTransformerDecoder

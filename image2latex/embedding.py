@@ -4,25 +4,20 @@ from torch import Tensor
 from torch.nn import Module, Parameter, Dropout, Conv2d, Embedding
 
 class PatchEmbeddings(Module):
-    def __init__(self, hyperparameters: dict[str, int]):
+    def __init__(self, image_size: tuple[int, int], patch_size: int, num_channels: int, embedding_dim: int):
         super().__init__()
         
-        self.image_size = hyperparameters["image_size"]
-        self.patch_size = hyperparameters["patch_size"]
-        self.num_channels = hyperparameters["num_channels"]
-        self.embedding_dim = hyperparameters["embedding_dim"]
-
         # Calculate the number of patches
-        self.num_patches_height = self.image_size[0] // self.patch_size
-        self.num_patches_width = self.image_size[1] // self.patch_size
+        self.num_patches_height = image_size[0] // patch_size
+        self.num_patches_width = image_size[1] // patch_size
         self.num_patches = (self.num_patches_height * self.num_patches_width)
         
         # Convolutional layer to map patches to the hidden size dimension
         self.patch_projection = Conv2d(
-            in_channels=self.num_channels, 
-            out_channels=self.embedding_dim, 
-            kernel_size=self.patch_size, 
-            stride=self.patch_size
+            in_channels=num_channels, 
+            out_channels=embedding_dim, 
+            kernel_size=patch_size, 
+            stride=patch_size
         )
     
     def forward(self, input_image: Tensor) -> Tensor:
@@ -45,20 +40,18 @@ class PatchEmbeddings(Module):
 
 
 class ImageEmbeddings(Module):
-    def __init__(self, hyperparameters: dict[str, int]):
+    def __init__(self, image_size: tuple[int, int], patch_size: int, num_channels: int, embedding_dim: int, dropout: float):
         super().__init__()
         
-        self.hyperparameters = hyperparameters
-        
         # Initialize patch embeddings based on the given hyperparameters
-        self.patch_embeddings = PatchEmbeddings(hyperparameters)
+        self.patch_embeddings = PatchEmbeddings(image_size, patch_size, num_channels, embedding_dim)
         
         # Learnable position embeddings to capture positional information in the sequence
         self.position_embeddings = Parameter(
-            torch.randn(1, self.patch_embeddings.num_patches, hyperparameters["embedding_dim"])
+            torch.randn(1, self.patch_embeddings.num_patches, embedding_dim)
         )
         
-        self.dropout = Dropout(hyperparameters["dropout"])
+        self.dropout = Dropout(dropout)
 
     def forward(self, input_image: Tensor) -> Tensor:
         """Forward pass of the Embeddings module.
@@ -83,14 +76,14 @@ class ImageEmbeddings(Module):
 
 
 class TargetEmbeddings(Module):
-    def __init__(self, hyperparameters: dict[str, int]):
+    def __init__(self, max_length: int, embedding_dim: int):
         super().__init__()
         
-        self.embeddings = Embedding(hyperparameters['max_length'], hyperparameters['embedding_dim'])
+        self.embeddings = Embedding(max_length, embedding_dim)
         
-        positional_encoding = torch.zeros(hyperparameters['max_length'], hyperparameters['embedding_dim'])
-        position = torch.arange(0, hyperparameters['max_length'], dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, hyperparameters['embedding_dim'], 2).float() * -(math.log(10000.0) / hyperparameters['embedding_dim']))
+        positional_encoding = torch.zeros(max_length, embedding_dim)
+        position = torch.arange(0, max_length, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, embedding_dim, 2).float() * -(math.log(10000.0) / embedding_dim))
         
         positional_encoding[:, 0::2] = torch.sin(position * div_term)
         positional_encoding[:, 1::2] = torch.cos(position * div_term)

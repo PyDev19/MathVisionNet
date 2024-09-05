@@ -1,1 +1,0 @@
-from model.transformer import Image2LaTeXVisionTransformer
