@@ -17,17 +17,11 @@ from torchvision.io import read_image
 from pytorch_lightning import LightningDataModule
 
 class MathEquationsDataset(Dataset):
-    def __init__(self, directory: str, image_size=(128, 512)):
+    def __init__(self, directory: str, transforms: Compose, image_size=(128, 512)):
         self.images = glob(os.path.join(f'{directory}/images/', '*.jpg'))
         self.labels = pd.read_csv(f'{directory}/annotations.csv')
         
-        self.transform = Compose([
-            Resize(image_size),
-            RandomInvert(),
-            ColorJitter(brightness=0.2, contrast=0.2, saturation=0.5, hue=0.5),
-            RandomAffine(degrees=2, translate=(0.02, 0.02)),
-            GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 0.5)),
-        ])
+        self.transform = transforms
 
     def __len__(self):
         return len(self.images)
@@ -58,6 +52,16 @@ class MathEquationsDatamodule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.image_size = image_size
+        
+        self.train_transform = Compose([
+            Resize(image_size),
+            RandomInvert(),
+            ColorJitter(brightness=0.2, contrast=0.2, saturation=0.5, hue=0.5),
+            RandomAffine(degrees=2, translate=(0.02, 0.02)),
+            GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 0.5)),
+        ])
+        
+        self.val_dataloader = Compose([Resize(image_size)])
     
     def collate_fn(self, batch):
         images, equations = zip(*batch)
@@ -79,6 +83,10 @@ class MathEquationsDatamodule(LightningDataModule):
         test_size = len(dataset) - train_size - val_size
         
         self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [train_size, val_size, test_size])
+        
+        self.train_dataset.dataset.transform = self.train_transform
+        self.val_dataset.dataset.transform = self.val_transform
+        self.test_dataset.dataset.transform = self.val_transform
 
     def train_dataloader(self):
         return DataLoader(
