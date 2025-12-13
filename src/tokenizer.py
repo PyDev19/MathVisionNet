@@ -13,6 +13,7 @@ class LaTeXTokenizer:
         self.sos_token_id = self.vocab["<SOS>"]
         self.eos_token_id = self.vocab["<EOS>"]
         self.pad_token_id = self.vocab["<PAD>"]
+        self.unk_token_id = self.vocab["<UNK>"]
 
     def _load_vocab(self, vocab_file: str) -> dict:
         vocab = {}

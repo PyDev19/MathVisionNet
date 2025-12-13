@@ -19,4 +19,6 @@ model_module = ModelModule(
     params_dir=params_dir,
     vocab_size=data_module.get_vocab_size(),
     image_size=image_size,
+    sos_token_id=data_module.get_token_id("<SOS>"),
+    eos_token_id=data_module.get_token_id("<EOS>"),
 )

@@ -24,7 +24,7 @@ class LaTeXDataModule:
         vocab_file: str = None,
     ):
         assert (
-            symbols_file is not None and vocab_file is not None
+            symbols_file is None and vocab_file is None
         ), "symbols_file or vocab_file must be provided"
 
         self.tokenizer = LaTeXTokenizer(symbols_file, vocab_file=vocab_file)
@@ -82,6 +82,9 @@ class LaTeXDataModule:
     
     def get_vocab_size(self) -> int:
         return len(self.tokenizer.vocab)
+
+    def get_token_id(self, token: str) -> int:
+        return self.tokenizer.vocab.get(token, self.tokenizer.unk_token_id)
 
     def _collate_fn(self, batch: list) -> dict:
         images, labels = zip(*batch)

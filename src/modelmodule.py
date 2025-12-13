@@ -10,10 +10,14 @@ class ModelModule:
         params_dir: str,
         vocab_size: int,
         image_size: tuple[int, int],
+        sos_token_id: int = 1,
+        eos_token_id: int = 2,
     ):
         self.model_name = model_name
         self.vocab_size = vocab_size
         self.image_size = image_size
+        self.sos_token_id = sos_token_id
+        self.eos_token_id = eos_token_id
 
         params_path = os.path.join(params_dir, f"{self.model_name}.yaml")
         with open(params_path, "r") as f:
@@ -28,6 +32,8 @@ class ModelModule:
                     **self.params["model"],
                     vocab_size=self.vocab_size,
                     image_size=self.image_size,
+                    sos_token_id=self.sos_token_id,
+                    eos_token_id=self.eos_token_id,
                 )
 
             case _:
