@@ -19,9 +19,7 @@ class LaTeXTokenizer:
         vocab = {}
 
         with open(vocab_file, "r", encoding="utf-8") as f:
-            for idx, line in enumerate(f):
-                token = line.strip()
-                vocab[token] = idx
+            vocab = json.load(f)
 
         return vocab
 
