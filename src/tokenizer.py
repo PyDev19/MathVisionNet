@@ -1,12 +1,21 @@
 import json
+import os
+import re
+from glob import glob
+from tqdm import tqdm
+from utils import parse_inkml
 
 
 class LaTeXTokenizer:
-    def __init__(self, symbols_file: str, vocab_file: str = None):
+    def __init__(self, data_dir: str):
+        self.token_re = re.compile(
+            r"\\(mathbb{[a-zA-Z]}|begin{[a-z]+}|end{[a-z]+}|operatorname\*|[a-zA-Z]+|.)"
+        )
+
         self.vocab = (
-            self._load_vocab(vocab_file)
-            if vocab_file
-            else self._build_vocab(symbols_file)
+            self._load_vocab(f"{data_dir}/vocab.json")
+            if os.path.exists(f"{data_dir}/vocab.json")
+            else self._build_vocab(data_dir)
         )
         self.rev_vocab = {idx: token for token, idx in self.vocab.items()}
 
@@ -14,6 +23,7 @@ class LaTeXTokenizer:
         self.eos_token_id = self.vocab["<EOS>"]
         self.pad_token_id = self.vocab["<PAD>"]
         self.unk_token_id = self.vocab["<UNK>"]
+        self.spc_token_id = self.vocab["<SPC>"]
 
     def _load_vocab(self, vocab_file: str) -> dict:
         vocab = {}
@@ -23,45 +33,58 @@ class LaTeXTokenizer:
 
         return vocab
 
-    def _build_vocab(self, symbols_file: str) -> dict:
-        vocab = {"<PAD>": 0, "<SOS>": 1, "<EOS>": 2, "<UNK>": 3, "<SPC>": 4}
+    def _tokenize(self, latex: str) -> list:
+        tokens = []
+        while latex:
+            if latex.startswith("\\"):
+                match = self.token_re.match(latex)
+                if match:
+                    token = match.group(0)
+                    tokens.append(token)
+                    latex = latex[len(token) :]
+                else:
+                    tokens.append("<UNK>")
+                    latex = latex[1:]
+            else:
+                char = latex[0]
+                char = "<SPC>" if char.isspace() else char
+                tokens.append(char)
+                latex = latex[1:]
 
-        for char_code in range(32, 127):
-            char = chr(char_code)
-            if char not in vocab and not char.isspace():
+        return tokens
+
+    def _build_vocab(self, data_dir: str) -> dict:
+        vocab = {
+            "<PAD>": 0,
+            "<SOS>": 1,
+            "<EOS>": 2,
+            "<UNK>": 3,
+            "<SPC>": 4,
+        }
+
+        for char in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
+            if char not in vocab:
                 vocab[char] = len(vocab)
 
-        with open(symbols_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+        inkml_files = glob(f"{data_dir}/train/*.inkml", recursive=True)
+        inkml_files.extend(glob(f"{data_dir}/synthetic/*.inkml", recursive=True))
 
-            for line in lines:
-                line_json = json.loads(line)
-                label = line_json["label"]
+        for file in tqdm(inkml_files, desc="Building vocabulary"):
+            _, latex = parse_inkml(file)
+            tokens = self._tokenize(latex)
 
-                if label not in vocab:
-                    vocab[label] = len(vocab)
+            for token in tokens:
+                if token not in vocab:
+                    vocab[token] = len(vocab)
 
-            with open("vocab.json", "w") as f:
-                json.dump(vocab, f, indent=4)
-
-            f.close()
+        with open(f"{data_dir}/vocab.json", "w", encoding="utf-8") as f:
+            json.dump(vocab, f, ensure_ascii=False, indent=4)
 
         return vocab
 
     def encode(self, sequence: str) -> list:
-        temp_token = ""
-        tokens = []
-
-        for char in sequence:
-            if char.isspace():
-                tokens.append(self.vocab["<SPC>"])
-
-            temp_token += char
-
-            if temp_token in self.vocab:
-                tokens.append(self.vocab[temp_token])
-                temp_token = ""
-
+        tokens = self._tokenize(sequence)
+        tokens = [self.vocab.get(token, self.unk_token_id) for token in tokens]
         tokens = [self.sos_token_id] + tokens + [self.eos_token_id]
 
         return tokens
@@ -82,13 +105,20 @@ class LaTeXTokenizer:
 
 
 if __name__ == "__main__":
-    tokenizer = LaTeXTokenizer("mathwriting-2024-excerpt/symbols.jsonl")
+    data_dir = "data/mathwriting-2024/"
+    tokenizer = LaTeXTokenizer(data_dir)
 
-    example_string = r"\overline{hu^{2}}+\frac{1}{2}k_{ap}g_{z}h^{2}"
+    files = glob(f"{data_dir}/test/*.inkml", recursive=True)
+    files.extend(glob(f"{data_dir}/valid/*.inkml", recursive=True))
 
-    encoded = tokenizer.encode(example_string)
-    decoded = tokenizer.decode(encoded)
+    for file in tqdm(files, desc="Testing"):
+        strokes, latex = parse_inkml(file)
 
-    print(example_string)
-    print(encoded)
-    print(decoded)
+        encoded = tokenizer.encode(latex)
+        decoded = tokenizer.decode(encoded)
+
+        assert (
+            decoded == latex
+        ), f"Decoded LaTeX does not match original for file {file}. Original: {latex}, Decoded: {decoded}"
+
+    print("All test files passed the encoding and decoding test.")
